@@ -1,0 +1,342 @@
+﻿{
+  "ticker": "AAPL",
+  "benchmark": "SPY",
+  "timestamp": "2026-04-04T07:18:51.965051+00:00",
+  "statistical_risk": {
+    "model_name": "StatisticalRiskModel",
+    "score": 19.37,
+    "level": "Low",
+    "factor_scores": [
+      {
+        "factor": "annualized_volatility",
+        "score": 37.17,
+        "raw_value": 0.24868491209506466,
+        "weight": 15.0,
+        "thresholds": {
+          "min_value": 0.1,
+          "max_value": 0.5,
+          "direction": "higher_worse"
+        }
+      },
+      {
+        "factor": "downside_volatility",
+        "score": 0.0,
+        "raw_value": 0.03849890147525117,
+        "weight": 15.0,
+        "thresholds": {
+          "min_value": 0.05,
+          "max_value": 0.35,
+          "direction": "higher_worse"
+        }
+      },
+      {
+        "factor": "beta",
+        "score": 100.0,
+        "raw_value": 2.5739725428551563,
+        "weight": 10.0,
+        "thresholds": {
+          "min_value": 0.2,
+          "max_value": 2.0,
+          "direction": "higher_worse"
+        }
+      },
+      {
+        "factor": "maximum_drawdown",
+        "score": 0.0,
+        "raw_value": 0.0165016501650165,
+        "weight": 15.0,
+        "thresholds": {
+          "min_value": 0.05,
+          "max_value": 0.6,
+          "direction": "higher_worse"
+        }
+      },
+      {
+        "factor": "historical_var_95",
+        "score": 7.22,
+        "raw_value": 0.0165016501650165,
+        "weight": 10.0,
+        "thresholds": {
+          "min_value": 0.01,
+          "max_value": 0.1,
+          "direction": "higher_worse"
+        }
+      },
+      {
+        "factor": "historical_cvar_95",
+        "score": 1.43,
+        "raw_value": 0.0165016501650165,
+        "weight": 10.0,
+        "thresholds": {
+          "min_value": 0.015,
+          "max_value": 0.12,
+          "direction": "higher_worse"
+        }
+      },
+      {
+        "factor": "liquidity_risk_proxy",
+        "score": 0.26,
+        "raw_value": 6.5850486470468805e-09,
+        "weight": 10.0,
+        "thresholds": {
+          "min_value": 0.0,
+          "max_value": 2.5e-06,
+          "direction": "higher_worse"
+        }
+      },
+      {
+        "factor": "AAA",
+        "score": 0.0,
+        "raw_value": null,
+        "weight": 0.0,
+        "thresholds": {
+          "min_value": 0.0,
+          "max_value": 1.0,
+          "direction": "higher_worse"
+        }
+      },
+      {
+        "factor": "BBB",
+        "score": 0.0,
+        "raw_value": null,
+        "weight": 0.0,
+        "thresholds": {
+          "min_value": 0.0,
+          "max_value": 1.0,
+          "direction": "higher_worse"
+        }
+      },
+      {
+        "factor": "CCC",
+        "score": 0.0,
+        "raw_value": null,
+        "weight": 0.0,
+        "thresholds": {
+          "min_value": 0.0,
+          "max_value": 1.0,
+          "direction": "higher_worse"
+        }
+      }
+    ],
+    "raw_metrics": {
+      "annualized_volatility": 0.24868491209506466,
+      "downside_volatility": 0.03849890147525117,
+      "beta": 2.5739725428551563,
+      "maximum_drawdown": 0.0165016501650165,
+      "historical_var_95": 0.0165016501650165,
+      "historical_cvar_95": 0.0165016501650165,
+      "liquidity_risk_proxy": 6.5850486470468805e-09,
+      "AAA": null,
+      "BBB": null,
+      "CCC": null
+    },
+    "weights": {
+      "annualized_volatility": 15,
+      "downside_volatility": 15,
+      "beta": 10,
+      "maximum_drawdown": 15,
+      "historical_var_95": 10,
+      "historical_cvar_95": 10,
+      "liquidity_risk_proxy": 10,
+      "AAA": 0,
+      "BBB": 0,
+      "CCC": 0
+    },
+    "notes": [
+      "AAA/BBB/CCC are reserved inactive placeholder factors with zero default impact."
+    ]
+  },
+  "structural_risk": {
+    "model_name": "StructuralRiskModel",
+    "score": 29.64,
+    "level": "Moderate",
+    "factor_scores": [
+      {
+        "factor": "profitability_risk",
+        "score": 26.11,
+        "raw_value": 0.2611111111111111,
+        "weight": 15.0,
+        "thresholds": {
+          "min_value": 0.0,
+          "max_value": 1.0,
+          "direction": "higher_worse"
+        }
+      },
+      {
+        "factor": "leverage_risk",
+        "score": 40.57,
+        "raw_value": 0.40567129629629634,
+        "weight": 15.0,
+        "thresholds": {
+          "min_value": 0.0,
+          "max_value": 1.0,
+          "direction": "higher_worse"
+        }
+      },
+      {
+        "factor": "cash_flow_quality_risk",
+        "score": 16.25,
+        "raw_value": 0.16250000000000003,
+        "weight": 15.0,
+        "thresholds": {
+          "min_value": 0.0,
+          "max_value": 1.0,
+          "direction": "higher_worse"
+        }
+      },
+      {
+        "factor": "valuation_stress_risk",
+        "score": 42.22,
+        "raw_value": 0.4222222222222222,
+        "weight": 10.0,
+        "thresholds": {
+          "min_value": 0.0,
+          "max_value": 1.0,
+          "direction": "higher_worse"
+        }
+      },
+      {
+        "factor": "growth_deceleration_risk",
+        "score": 23.65,
+        "raw_value": 0.2364607151352653,
+        "weight": 10.0,
+        "thresholds": {
+          "min_value": 0.0,
+          "max_value": 1.0,
+          "direction": "higher_worse"
+        }
+      },
+      {
+        "factor": "size_concentration_risk",
+        "score": 11.67,
+        "raw_value": 0.11666666666666667,
+        "weight": 10.0,
+        "thresholds": {
+          "min_value": 0.0,
+          "max_value": 1.0,
+          "direction": "higher_worse"
+        }
+      },
+      {
+        "factor": "sector_policy_risk",
+        "score": 50.0,
+        "raw_value": 0.5,
+        "weight": 10.0,
+        "thresholds": {
+          "min_value": 0.0,
+          "max_value": 1.0,
+          "direction": "higher_worse"
+        }
+      },
+      {
+        "factor": "altman_z_score",
+        "score": 0.0,
+        "raw_value": null,
+        "weight": 5.0,
+        "thresholds": {
+          "min_value": 0.0,
+          "max_value": 1.0,
+          "direction": "higher_worse"
+        }
+      },
+      {
+        "factor": "AAA",
+        "score": 0.0,
+        "raw_value": null,
+        "weight": 0.0,
+        "thresholds": {
+          "min_value": 0.0,
+          "max_value": 1.0,
+          "direction": "higher_worse"
+        }
+      },
+      {
+        "factor": "BBB",
+        "score": 0.0,
+        "raw_value": null,
+        "weight": 0.0,
+        "thresholds": {
+          "min_value": 0.0,
+          "max_value": 1.0,
+          "direction": "higher_worse"
+        }
+      },
+      {
+        "factor": "CCC",
+        "score": 0.0,
+        "raw_value": null,
+        "weight": 0.0,
+        "thresholds": {
+          "min_value": 0.0,
+          "max_value": 1.0,
+          "direction": "higher_worse"
+        }
+      }
+    ],
+    "raw_metrics": {
+      "profitability_risk": 0.2611111111111111,
+      "leverage_risk": 0.40567129629629634,
+      "cash_flow_quality_risk": 0.16250000000000003,
+      "valuation_stress_risk": 0.4222222222222222,
+      "growth_deceleration_risk": 0.2364607151352653,
+      "size_concentration_risk": 0.11666666666666667,
+      "sector_policy_risk": 0.5,
+      "altman_z_score": null,
+      "AAA": null,
+      "BBB": null,
+      "CCC": null
+    },
+    "weights": {
+      "profitability_risk": 15,
+      "leverage_risk": 15,
+      "cash_flow_quality_risk": 15,
+      "valuation_stress_risk": 10,
+      "growth_deceleration_risk": 10,
+      "size_concentration_risk": 10,
+      "sector_policy_risk": 10,
+      "altman_z_score": 5,
+      "AAA": 0,
+      "BBB": 0,
+      "CCC": 0
+    },
+    "notes": [
+      "AAA/BBB/CCC are reserved inactive placeholder factors with zero default impact."
+    ]
+  },
+  "llm_summary": {
+    "short_summary": "AAPL has a statistical risk score of 19.37 and structural risk score of 29.64.",
+    "long_summary": "For AAPL, the Statistical Risk Model indicates a risk level of Low, with key factors including volatility and drawdown. The Structural Risk Model shows a risk level of Moderate, focusing on profitability and leverage. Major contributors are annualized volatility and profitability risk.",
+    "key_risk_drivers": [
+      "Annualized Volatility",
+      "Profitability Risk",
+      "Maximum Drawdown"
+    ],
+    "model_disagreement_note": "Models disagree significantly.",
+    "reserved_factor_note": "AAA, BBB, and CCC are reserved placeholder factors with zero impact on the scores.",
+    "final_combined_interpretation": "Overall, AAPL exhibits low combined risk."
+  },
+  "reserved_factors_status": {
+    "AAA": {
+      "enabled": false,
+      "weight": 0.0,
+      "raw_value": null,
+      "normalized_score": 0.0,
+      "affects_final_score": false
+    },
+    "BBB": {
+      "enabled": false,
+      "weight": 0.0,
+      "raw_value": null,
+      "normalized_score": 0.0,
+      "affects_final_score": false
+    },
+    "CCC": {
+      "enabled": false,
+      "weight": 0.0,
+      "raw_value": null,
+      "normalized_score": 0.0,
+      "affects_final_score": false
+    }
+  }
+}
+
