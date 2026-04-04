@@ -14,3 +14,6 @@ venv/
 
 # Runtime/generated outputs
 main_output_*.json
+
+# Editor artifacts
+.vscode/
