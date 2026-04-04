@@ -48,12 +48,30 @@ Supported options:
 - `--output-json`
 - `--disable-llm`
 - `--config`
+- `--debug`
+- `--no-real-market-data`
 
 Example with JSON export:
 
 ```bash
 python main.py --ticker TSLA --benchmark SPY --lookback 252 --output-json main_output_tsla.json
 ```
+
+## Streamlit UI
+
+Run the UI:
+
+```bash
+pip install streamlit
+streamlit run ui/app.py
+```
+
+The UI includes a reusable price chart module that:
+
+- fetches the last 30 trading days for the selected ticker using the existing market adapter
+- prefers adjusted close and falls back to close
+- shows latest price, 30-day high/low, and 30-day return
+- displays a clear message when market data cannot be fetched
 
 ## JSON Output Schema
 

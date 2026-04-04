@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import math
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from statistics import mean, stdev
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
 
@@ -19,6 +21,132 @@ class RiskDataAdapter(ABC):
     ) -> Mapping[str, Sequence[Mapping[str, Any]]]:
         """Return a mapping with at least 'asset' and 'benchmark' time series."""
         raise NotImplementedError
+
+
+class YFinanceDataAdapter(RiskDataAdapter):
+    """Fetches aligned daily OHLCV data for asset and benchmark using yfinance."""
+
+    def __init__(
+        self,
+        fallback_data: Optional[Mapping[str, Sequence[Mapping[str, Any]]]] = None,
+        logger: Optional[logging.Logger] = None,
+    ):
+        self.fallback_data = fallback_data
+        self.logger = logger or logging.getLogger(__name__)
+
+    def get_price_history(
+        self,
+        ticker: str,
+        lookback_window: int,
+        benchmark_ticker: Optional[str] = None,
+    ) -> Mapping[str, Sequence[Mapping[str, Any]]]:
+        benchmark = benchmark_ticker or "SPY"
+        try:
+            asset_df = self._download_history(ticker, lookback_window)
+            benchmark_df = self._download_history(benchmark, lookback_window)
+
+            asset_rows = self._frame_to_rows(asset_df)
+            benchmark_rows = self._frame_to_rows(benchmark_df)
+            aligned_asset, aligned_benchmark = self._align_rows(asset_rows, benchmark_rows)
+
+            if len(aligned_asset) < 2:
+                raise ValueError("Insufficient aligned rows after cleaning and alignment.")
+
+            return {
+                "asset": aligned_asset,
+                "benchmark": aligned_benchmark,
+            }
+        except Exception as exc:
+            if self.fallback_data is not None:
+                self.logger.warning(
+                    "YFinanceDataAdapter failed, using fallback data: %s", exc
+                )
+                return self.fallback_data
+            self.logger.error("YFinanceDataAdapter failed and no fallback is configured: %s", exc)
+            raise
+
+    def _download_history(self, ticker: str, lookback_window: int):
+        try:
+            import yfinance as yf
+        except ImportError as exc:
+            raise ImportError("yfinance is required for YFinanceDataAdapter") from exc
+
+        # Use a larger pull window than the trading-day lookback so holidays/weekends do not truncate data.
+        period_days = max(lookback_window * 2, 90)
+        period = f"{period_days}d"
+
+        frame = yf.download(
+            tickers=ticker,
+            period=period,
+            interval="1d",
+            auto_adjust=False,
+            progress=False,
+            threads=False,
+        )
+        if getattr(frame, "empty", True):
+            raise ValueError(f"No data returned for ticker {ticker}")
+        # yfinance >= 0.2 returns MultiIndex columns (price_label, ticker) for single-ticker
+        # downloads.  Flatten to just the price label so _frame_to_rows can use plain .get().
+        if hasattr(frame.columns, "nlevels") and frame.columns.nlevels > 1:
+            frame = frame.copy()
+            frame.columns = frame.columns.get_level_values(0)
+        return frame
+
+    @staticmethod
+    def _is_missing(value: Any) -> bool:
+        if value is None:
+            return True
+        try:
+            return bool(math.isnan(float(value)))
+        except (TypeError, ValueError):
+            return False
+
+    def _frame_to_rows(self, frame: Any) -> List[Dict[str, Any]]:
+        rows: List[Dict[str, Any]] = []
+        for index_value, row in frame.iterrows():
+            adj_close = row.get("Adj Close")
+            close = row.get("Close")
+            volume = row.get("Volume")
+
+            # Prefer adjusted close when present.
+            if self._is_missing(adj_close):
+                adj_close = close
+
+            # Drop rows with missing required fields.
+            if self._is_missing(adj_close) or self._is_missing(close) or self._is_missing(volume):
+                continue
+
+            if isinstance(index_value, datetime):
+                date_str = index_value.date().isoformat()
+            elif hasattr(index_value, "date"):
+                date_str = index_value.date().isoformat()
+            else:
+                date_str = str(index_value)
+
+            rows.append(
+                {
+                    "date": date_str,
+                    "adj_close": float(adj_close),
+                    "close": float(close),
+                    "volume": float(volume),
+                }
+            )
+        return rows
+
+    def _align_rows(
+        self,
+        asset_rows: Sequence[Mapping[str, Any]],
+        benchmark_rows: Sequence[Mapping[str, Any]],
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        asset_by_date = {str(row["date"]): dict(row) for row in asset_rows if row.get("date") is not None}
+        benchmark_by_date = {str(row["date"]): dict(row) for row in benchmark_rows if row.get("date") is not None}
+
+        common_dates = sorted(set(asset_by_date.keys()).intersection(benchmark_by_date.keys()))
+        aligned_asset = [asset_by_date[d] for d in common_dates]
+        aligned_benchmark = [benchmark_by_date[d] for d in common_dates]
+
+        # Ensure same length and at least lookback depth by retaining latest common dates.
+        return aligned_asset, aligned_benchmark
 
 
 @dataclass
