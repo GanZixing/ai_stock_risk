@@ -5,6 +5,7 @@ import json
 import os
 from typing import Any, Callable, Dict, List, Optional, Union
 from urllib import error as urllib_error
+from urllib import parse as urllib_parse
 from urllib import request as urllib_request
 
 from schemas import ModelResult
@@ -54,6 +55,15 @@ class LLMSummaryLayer:
 
         # Parse the response into structured output
         parsed = self._parse_llm_response(llm_response)
+        if parsed.short_summary == "Summary generation failed." and self.last_provider_used != "fallback_mock":
+            provider = self.last_provider_used
+            if provider:
+                self.provider_errors[provider] = "Provider response was not valid JSON summary output"
+            self.last_provider_used = "fallback_mock"
+            if "fallback_mock" not in self.provider_attempts:
+                self.provider_attempts.append("fallback_mock")
+            parsed = self._parse_llm_response(self._mock_llm_provider(prompt))
+
         return self._enforce_grounding(parsed, stat_dict, struct_dict)
 
     def _generate_with_failover(self, prompt: str) -> str:
@@ -132,7 +142,8 @@ class LLMSummaryLayer:
 
     def _generate_with_ollama3(self, prompt: str) -> str:
         base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-        model = os.getenv("OLLAMA_MODEL", "llama3")
+        model = os.getenv("OLLAMA_MODEL", "llama3:latest")
+        timeout_seconds = int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120"))
         url = f"{base_url.rstrip('/')}/api/generate"
         payload = {
             "model": model,
@@ -146,7 +157,17 @@ class LLMSummaryLayer:
             method="POST",
         )
         try:
-            with urllib_request.urlopen(req, timeout=20) as response:
+            parsed_url = urllib_parse.urlparse(url)
+            host = (parsed_url.hostname or "").lower()
+            bypass_proxy = host in {"localhost", "127.0.0.1", "::1"}
+
+            if bypass_proxy:
+                opener = urllib_request.build_opener(urllib_request.ProxyHandler({}))
+                response_ctx = opener.open(req, timeout=timeout_seconds)
+            else:
+                response_ctx = urllib_request.urlopen(req, timeout=timeout_seconds)
+
+            with response_ctx as response:
                 body = response.read().decode("utf-8")
         except urllib_error.URLError as exc:
             raise RuntimeError(f"Ollama request failed: {exc}") from exc

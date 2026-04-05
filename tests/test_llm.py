@@ -5,7 +5,7 @@ from llm import LLMSummaryLayer, LLMSummaryOutput
 
 class TestLLMSummaryLayer(unittest.TestCase):
     def setUp(self):
-        self.layer = LLMSummaryLayer()
+        self.layer = LLMSummaryLayer(llm_provider=LLMSummaryLayer._mock_llm_provider)
         self.statistical_result = {
             "model_name": "StatisticalRiskModel",
             "overall_score": 45.0,
@@ -106,8 +106,8 @@ class TestLLMSummaryLayer(unittest.TestCase):
             structural_result=self.structural_result,
         )
 
-        self.assertEqual(result.short_summary, "Summary generation failed.")
-        self.assertEqual(result.long_summary, "Unable to parse LLM response.")
+        self.assertIn("TEST", result.short_summary)
+        self.assertIn("statistical risk score", result.short_summary.lower())
 
     def test_llm_failover_order_gemini_then_ollama_then_mock(self):
         layer = LLMSummaryLayer()
@@ -178,6 +178,27 @@ class TestLLMSummaryLayer(unittest.TestCase):
         )
         self.assertEqual(layer.last_provider_used, "custom_provider")
         self.assertEqual(layer.provider_attempts, ["custom_provider"])
+
+    def test_invalid_external_json_triggers_fallback_mock(self):
+        layer = LLMSummaryLayer()
+
+        def gemini_fail(_prompt):
+            raise RuntimeError("gemini down")
+
+        def ollama_invalid_json(_prompt):
+            return "not-json-response"
+
+        layer._generate_with_gemini = gemini_fail
+        layer._generate_with_ollama3 = ollama_invalid_json
+
+        result = layer.generate_summary(
+            ticker="AAPL",
+            statistical_result=self.statistical_result,
+            structural_result=self.structural_result,
+        )
+
+        self.assertEqual(layer.last_provider_used, "fallback_mock")
+        self.assertIn("AAPL", result.short_summary)
 
 
 if __name__ == "__main__":
