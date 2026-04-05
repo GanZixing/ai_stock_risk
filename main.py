@@ -649,7 +649,7 @@ def _print_formatted_summary(output: Dict[str, Any], llm_enabled: bool) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Stock Risk Agent CLI")
-    parser.add_argument("--ticker", required=True, help="Stock ticker symbol (e.g., TSLA)")
+    parser.add_argument("--ticker", default="TSLA", help="Stock ticker symbol (default: TSLA)")
     parser.add_argument("--benchmark", default="SPY", help="Benchmark ticker (default: SPY)")
     parser.add_argument("--lookback", type=int, default=252, help="Lookback window for statistical model")
     parser.add_argument("--output-json", help="Optional output JSON file path")

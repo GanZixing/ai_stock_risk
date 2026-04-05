@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
+import os
 from typing import Any, Callable, Dict, List, Optional, Union
+from urllib import error as urllib_error
+from urllib import request as urllib_request
 
 from schemas import ModelResult
 
@@ -22,7 +26,8 @@ class LLMSummaryLayer:
         llm_provider: Optional[Callable[[str], str]] = None,
         prompt_template: Optional[str] = None,
     ):
-        self.llm_provider = llm_provider or self._mock_llm_provider
+        # Optional direct provider override for tests/custom integrations.
+        self.llm_provider = llm_provider
         self.prompt_template = prompt_template or self._default_prompt_template()
 
     def generate_summary(
@@ -41,12 +46,96 @@ class LLMSummaryLayer:
             ticker, stat_dict, struct_dict, reserved_factors_status, combined_metadata
         )
 
-        # Call LLM (or mock)
-        llm_response = self.llm_provider(prompt)
+        # Call LLM in order: Gemini -> local Ollama3 -> existing fallback mock.
+        llm_response = self._generate_with_failover(prompt)
 
         # Parse the response into structured output
         parsed = self._parse_llm_response(llm_response)
         return self._enforce_grounding(parsed, stat_dict, struct_dict)
+
+    def _generate_with_failover(self, prompt: str) -> str:
+        if self.llm_provider is not None:
+            return self.llm_provider(prompt)
+
+        last_error: Optional[Exception] = None
+
+        for provider in (self._generate_with_gemini, self._generate_with_ollama3):
+            try:
+                response = provider(prompt)
+                if response:
+                    return response
+            except Exception as exc:
+                last_error = exc
+
+        if last_error is not None:
+            # Keep fallback deterministic and available even when remote APIs fail.
+            return self._mock_llm_provider(prompt)
+        return self._mock_llm_provider(prompt)
+
+    def _generate_with_gemini(self, prompt: str) -> str:
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise RuntimeError("GEMINI_API_KEY is not set")
+
+        model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+        url = (
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+            f"?key={api_key}"
+        )
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": 0.2},
+        }
+        req = urllib_request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib_request.urlopen(req, timeout=20) as response:
+                body = response.read().decode("utf-8")
+        except urllib_error.URLError as exc:
+            raise RuntimeError(f"Gemini request failed: {exc}") from exc
+
+        parsed = json.loads(body)
+        candidates = parsed.get("candidates", [])
+        if not candidates:
+            raise RuntimeError("Gemini returned no candidates")
+        parts = (((candidates[0] or {}).get("content") or {}).get("parts") or [])
+        if not parts:
+            raise RuntimeError("Gemini returned empty content parts")
+        text = parts[0].get("text")
+        if not isinstance(text, str) or not text.strip():
+            raise RuntimeError("Gemini returned empty text")
+        return text
+
+    def _generate_with_ollama3(self, prompt: str) -> str:
+        base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        model = os.getenv("OLLAMA_MODEL", "llama3")
+        url = f"{base_url.rstrip('/')}/api/generate"
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "stream": False,
+        }
+        req = urllib_request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib_request.urlopen(req, timeout=20) as response:
+                body = response.read().decode("utf-8")
+        except urllib_error.URLError as exc:
+            raise RuntimeError(f"Ollama request failed: {exc}") from exc
+
+        parsed = json.loads(body)
+        text = parsed.get("response")
+        if not isinstance(text, str) or not text.strip():
+            raise RuntimeError("Ollama returned empty response text")
+        return text
 
     def _enforce_grounding(
         self,

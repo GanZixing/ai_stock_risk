@@ -109,6 +109,59 @@ class TestLLMSummaryLayer(unittest.TestCase):
         self.assertEqual(result.short_summary, "Summary generation failed.")
         self.assertEqual(result.long_summary, "Unable to parse LLM response.")
 
+    def test_llm_failover_order_gemini_then_ollama_then_mock(self):
+        layer = LLMSummaryLayer()
+
+        calls = []
+
+        def gemini_fail(_prompt):
+            calls.append("gemini")
+            raise RuntimeError("gemini down")
+
+        def ollama_success(_prompt):
+            calls.append("ollama")
+            return (
+                '{"short_summary":"ok","long_summary":"ok","key_risk_drivers":["annualized_volatility"],'
+                '"model_disagreement_note":"note","reserved_factor_note":"note","final_combined_interpretation":"ok"}'
+            )
+
+        layer._generate_with_gemini = gemini_fail
+        layer._generate_with_ollama3 = ollama_success
+
+        result = layer.generate_summary(
+            ticker="AAPL",
+            statistical_result=self.statistical_result,
+            structural_result=self.structural_result,
+        )
+
+        self.assertEqual(calls, ["gemini", "ollama"])
+        self.assertEqual(result.short_summary, "ok")
+
+    def test_llm_failover_reaches_mock_when_both_external_fail(self):
+        layer = LLMSummaryLayer()
+
+        calls = []
+
+        def gemini_fail(_prompt):
+            calls.append("gemini")
+            raise RuntimeError("gemini down")
+
+        def ollama_fail(_prompt):
+            calls.append("ollama")
+            raise RuntimeError("ollama down")
+
+        layer._generate_with_gemini = gemini_fail
+        layer._generate_with_ollama3 = ollama_fail
+
+        result = layer.generate_summary(
+            ticker="AAPL",
+            statistical_result=self.statistical_result,
+            structural_result=self.structural_result,
+        )
+
+        self.assertEqual(calls, ["gemini", "ollama"])
+        self.assertIn("AAPL", result.short_summary)
+
 
 if __name__ == "__main__":
     unittest.main()
