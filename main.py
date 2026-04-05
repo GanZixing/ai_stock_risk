@@ -528,6 +528,9 @@ def run_stock_risk_agent(
     )
 
     llm_summary = None
+    llm_provider_used: Optional[str] = None
+    llm_provider_attempts: List[str] = []
+    llm_provider_errors: Dict[str, str] = {}
     if not disable_llm:
         summary_layer = LLMSummaryLayer()
         llm_summary = summary_layer.generate_summary(
@@ -536,6 +539,9 @@ def run_stock_risk_agent(
             structural_result=struct_result,
             reserved_factors_status={factor: "inactive_placeholder" for factor in RESERVED_FACTORS},
         )
+        llm_provider_used = summary_layer.last_provider_used
+        llm_provider_attempts = list(summary_layer.provider_attempts)
+        llm_provider_errors = dict(summary_layer.provider_errors)
 
     output = build_agent_output(
         ticker=ticker,
@@ -611,6 +617,12 @@ def run_stock_risk_agent(
             "missing_data_notes": _missing_data_notes_for_structural(runtime_data, struct_model),
             "input_fields": _extract_structural_input_fields(runtime_data),
         },
+        "llm": {
+            "enabled": not disable_llm,
+            "provider_used": llm_provider_used,
+            "provider_attempts": llm_provider_attempts,
+            "provider_errors": llm_provider_errors,
+        },
     }
     debug_data["underestimation_explanation"] = _low_score_explanation(debug_data)
 
@@ -620,7 +632,7 @@ def run_stock_risk_agent(
     return output, debug_data
 
 
-def _print_formatted_summary(output: Dict[str, Any], llm_enabled: bool) -> None:
+def _print_formatted_summary(output: Dict[str, Any], llm_enabled: bool, llm_provider_used: Optional[str] = None) -> None:
     stat = output["statistical_risk"]
     struct = output["structural_risk"]
 
@@ -634,6 +646,8 @@ def _print_formatted_summary(output: Dict[str, Any], llm_enabled: bool) -> None:
         llm_summary = output["llm_summary"]
         print("-")
         print("LLM Summary:")
+        if llm_provider_used:
+            print(f"  Provider Used: {llm_provider_used}")
         print(f"  Short: {llm_summary['short_summary']}")
         print(f"  Disagreement: {llm_summary['model_disagreement_note']}")
 
@@ -682,7 +696,11 @@ def main() -> None:
         prefer_real_market_data=not args.no_real_market_data,
     )
 
-    _print_formatted_summary(output, llm_enabled=not args.disable_llm)
+    _print_formatted_summary(
+        output,
+        llm_enabled=not args.disable_llm,
+        llm_provider_used=_debug_data.get("llm", {}).get("provider_used"),
+    )
 
     if args.output_json:
         with open(args.output_json, "w", encoding="utf-8") as f:

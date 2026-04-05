@@ -136,6 +136,8 @@ class TestLLMSummaryLayer(unittest.TestCase):
 
         self.assertEqual(calls, ["gemini", "ollama"])
         self.assertEqual(result.short_summary, "ok")
+        self.assertEqual(layer.last_provider_used, "ollama3_local")
+        self.assertEqual(layer.provider_attempts, ["gemini", "ollama3_local"])
 
     def test_llm_failover_reaches_mock_when_both_external_fail(self):
         layer = LLMSummaryLayer()
@@ -161,6 +163,21 @@ class TestLLMSummaryLayer(unittest.TestCase):
 
         self.assertEqual(calls, ["gemini", "ollama"])
         self.assertIn("AAPL", result.short_summary)
+        self.assertEqual(layer.last_provider_used, "fallback_mock")
+        self.assertEqual(layer.provider_attempts, ["gemini", "ollama3_local", "fallback_mock"])
+
+    def test_llm_custom_provider_tracking(self):
+        def custom_llm(_prompt):
+            return '{"short_summary":"x","long_summary":"x","key_risk_drivers":["annualized_volatility"],"model_disagreement_note":"x","reserved_factor_note":"x","final_combined_interpretation":"x"}'
+
+        layer = LLMSummaryLayer(llm_provider=custom_llm)
+        _result = layer.generate_summary(
+            ticker="AAPL",
+            statistical_result=self.statistical_result,
+            structural_result=self.structural_result,
+        )
+        self.assertEqual(layer.last_provider_used, "custom_provider")
+        self.assertEqual(layer.provider_attempts, ["custom_provider"])
 
 
 if __name__ == "__main__":

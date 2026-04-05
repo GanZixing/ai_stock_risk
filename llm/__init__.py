@@ -29,6 +29,9 @@ class LLMSummaryLayer:
         # Optional direct provider override for tests/custom integrations.
         self.llm_provider = llm_provider
         self.prompt_template = prompt_template or self._default_prompt_template()
+        self.last_provider_used: str = "not_run"
+        self.provider_attempts: List[str] = []
+        self.provider_errors: Dict[str, str] = {}
 
     def generate_summary(
         self,
@@ -54,22 +57,39 @@ class LLMSummaryLayer:
         return self._enforce_grounding(parsed, stat_dict, struct_dict)
 
     def _generate_with_failover(self, prompt: str) -> str:
+        self.provider_attempts = []
+        self.provider_errors = {}
+
         if self.llm_provider is not None:
+            self.provider_attempts.append("custom_provider")
+            self.last_provider_used = "custom_provider"
             return self.llm_provider(prompt)
 
         last_error: Optional[Exception] = None
 
-        for provider in (self._generate_with_gemini, self._generate_with_ollama3):
+        providers = (
+            ("gemini", self._generate_with_gemini),
+            ("ollama3_local", self._generate_with_ollama3),
+        )
+
+        for provider_name, provider in providers:
+            self.provider_attempts.append(provider_name)
             try:
                 response = provider(prompt)
                 if response:
+                    self.last_provider_used = provider_name
                     return response
             except Exception as exc:
                 last_error = exc
+                self.provider_errors[provider_name] = str(exc)
 
         if last_error is not None:
             # Keep fallback deterministic and available even when remote APIs fail.
+            self.last_provider_used = "fallback_mock"
+            self.provider_attempts.append("fallback_mock")
             return self._mock_llm_provider(prompt)
+        self.last_provider_used = "fallback_mock"
+        self.provider_attempts.append("fallback_mock")
         return self._mock_llm_provider(prompt)
 
     def _generate_with_gemini(self, prompt: str) -> str:
