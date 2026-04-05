@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import logging
+import os
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Union
 
 from schemas import ModelResult
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -22,7 +26,7 @@ class LLMSummaryLayer:
         llm_provider: Optional[Callable[[str], str]] = None,
         prompt_template: Optional[str] = None,
     ):
-        self.llm_provider = llm_provider or self._mock_llm_provider
+        self.llm_provider = llm_provider or self._cascade_provider
         self.prompt_template = prompt_template or self._default_prompt_template()
 
     def generate_summary(
@@ -175,6 +179,61 @@ Ensure the summary is grounded strictly in the provided model outputs. Do not in
             reserved_status=json.dumps(reserved or {}, indent=2),
             metadata=json.dumps(metadata or {}, indent=2),
         )
+
+    @staticmethod
+    def _gemini_provider(prompt: str) -> str:
+        """Call Google Gemini API. Requires GEMINI_API_KEY environment variable."""
+        try:
+            from google import genai  # type: ignore
+        except ImportError as exc:
+            raise RuntimeError("google-genai package is not installed") from exc
+
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            raise RuntimeError("GEMINI_API_KEY environment variable is not set")
+
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=prompt,
+        )
+        return response.text
+
+    @staticmethod
+    def _ollama_provider(prompt: str) -> str:
+        """Call local Ollama API (llama3). Auto-detects availability on localhost:11434."""
+        import json
+        import urllib.request
+
+        url = "http://localhost:11434/api/generate"
+        payload = json.dumps({"model": "llama3", "prompt": prompt, "stream": False}).encode()
+        req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            data = json.loads(resp.read().decode())
+        return data["response"]
+
+    @classmethod
+    def _cascade_provider(cls, prompt: str) -> str:
+        """Try Gemini → Ollama → mock, returning the first successful response."""
+        import urllib.error
+
+        providers = [
+            ("Gemini", cls._gemini_provider),
+            ("Ollama (llama3)", cls._ollama_provider),
+            ("Mock", cls._mock_llm_provider),
+        ]
+        last_error: Optional[Exception] = None
+        for name, provider in providers:
+            try:
+                result = provider(prompt)
+                if name != "Mock":
+                    logger.info("LLM cascade: using %s", name)
+                return result
+            except (RuntimeError, OSError, ImportError, urllib.error.URLError) as exc:
+                logger.debug("LLM cascade: %s failed – %s", name, exc)
+                last_error = exc
+        # Should never reach here because _mock_llm_provider does not raise
+        raise RuntimeError("All LLM providers failed") from last_error
 
     @staticmethod
     def _mock_llm_provider(prompt: str) -> str:
