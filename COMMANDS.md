@@ -69,11 +69,13 @@ python main.py --config config/custom_run.json
 Create `.env.local` in project root and add:
 ```env
 GEMINI_API_KEY=your_key_here
+STOCK_LIST_FILE=C:\path\to\stock_list.txt
 # Optional
 # GEMINI_MODEL=gemini-1.5-flash
 # OLLAMA_BASE_URL=http://localhost:11434
 # OLLAMA_MODEL=llama3:latest
 # OLLAMA_TIMEOUT_SECONDS=600
+# BATCH_SAVE_COMBINED_LOG=1
 ```
 
 ### Verify Ollama service is running
@@ -108,8 +110,19 @@ python main.py --ticker TSLA --chart
 ### Investigate provider failures
 ```powershell
 & .\.venv\Scripts\Activate.ps1
-python main.py --ticker TSLA --llm-all-providers --debug
+python main.py --ticker TSLA --llm-all-providers --debug --chart
 ```
+
+### Batch run from ticker list TXT
+```powershell
+& .\run_batch_analysis.bat
+```
+
+Notes:
+- `run_batch_analysis.bat` reads `STOCK_LIST_FILE` from `.env.local`.
+- Supports blank lines and comment lines (`#`, `;`, `//`) in the ticker TXT.
+- Saves one file per ticker under `outputs/`.
+- Saves a per-run combined log like `outputs/batch_run_20260411_153206.log` (disable with `BATCH_SAVE_COMBINED_LOG=0`).
 
 ---
 

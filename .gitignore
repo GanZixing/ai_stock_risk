@@ -18,3 +18,5 @@ main_output_*.json
 
 # Editor artifacts
 .vscode/
+
+outputs/
