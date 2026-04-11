@@ -2,13 +2,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import logging
 import os
-from typing import Any, Callable, Dict, List, Optional, Union
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from urllib import error as urllib_error
 from urllib import parse as urllib_parse
 from urllib import request as urllib_request
 
 from schemas import ModelResult
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
@@ -21,7 +26,17 @@ class LLMSummaryOutput:
     final_combined_interpretation: str
 
 
+@dataclass
+class LLMProviderRunResult:
+    provider: str
+    status: str  # success | failed | skipped
+    reason: Optional[str]
+    summary: Optional[LLMSummaryOutput]
+
+
 class LLMSummaryLayer:
+    PROVIDER_ORDER = ("gemini", "ollama3_local", "fallback_mock")
+
     def __init__(
         self,
         llm_provider: Optional[Callable[[str], str]] = None,
@@ -54,17 +69,78 @@ class LLMSummaryLayer:
         llm_response = self._generate_with_failover(prompt)
 
         # Parse the response into structured output
-        parsed = self._parse_llm_response(llm_response)
+        parsed, parse_reason = self._parse_llm_response_with_reason(llm_response)
         if parsed.short_summary == "Summary generation failed." and self.last_provider_used != "fallback_mock":
             provider = self.last_provider_used
             if provider:
-                self.provider_errors[provider] = "Provider response was not valid JSON summary output"
+                self.provider_errors[provider] = parse_reason or "invalid JSON summary output"
             self.last_provider_used = "fallback_mock"
             if "fallback_mock" not in self.provider_attempts:
                 self.provider_attempts.append("fallback_mock")
-            parsed = self._parse_llm_response(self._mock_llm_provider(prompt))
+            parsed, _ = self._parse_llm_response_with_reason(self._mock_llm_provider(prompt))
 
         return self._enforce_grounding(parsed, stat_dict, struct_dict)
+
+    def generate_all_provider_summaries(
+        self,
+        ticker: str,
+        statistical_result: Union[ModelResult, Dict[str, Any]],
+        structural_result: Union[ModelResult, Dict[str, Any]],
+        reserved_factors_status: Optional[Dict[str, Any]] = None,
+        combined_metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, LLMProviderRunResult]:
+        stat_dict = statistical_result.to_dict() if hasattr(statistical_result, "to_dict") else statistical_result
+        struct_dict = structural_result.to_dict() if hasattr(structural_result, "to_dict") else structural_result
+        prompt = self._build_prompt(
+            ticker,
+            stat_dict,
+            struct_dict,
+            reserved_factors_status,
+            combined_metadata,
+        )
+
+        results: Dict[str, LLMProviderRunResult] = {}
+        for provider_name in self.PROVIDER_ORDER:
+            results[provider_name] = self._run_single_provider(provider_name, prompt, stat_dict, struct_dict)
+        return results
+
+    def _run_single_provider(
+        self,
+        provider_name: str,
+        prompt: str,
+        statistical: Dict[str, Any],
+        structural: Dict[str, Any],
+    ) -> LLMProviderRunResult:
+        if provider_name == "gemini" and os.getenv("LLM_SKIP_GEMINI", "0") == "1":
+            return LLMProviderRunResult(provider=provider_name, status="skipped", reason="disabled by LLM_SKIP_GEMINI=1", summary=None)
+        if provider_name == "ollama3_local" and os.getenv("LLM_SKIP_OLLAMA", "0") == "1":
+            return LLMProviderRunResult(provider=provider_name, status="skipped", reason="disabled by LLM_SKIP_OLLAMA=1", summary=None)
+
+        if provider_name == "gemini":
+            provider_fn = self._generate_with_gemini
+        elif provider_name == "ollama3_local":
+            provider_fn = self._generate_with_ollama3
+        elif provider_name == "fallback_mock":
+            provider_fn = self._mock_llm_provider
+        else:
+            return LLMProviderRunResult(provider=provider_name, status="failed", reason="unknown provider", summary=None)
+
+        try:
+            raw = provider_fn(prompt)
+        except Exception as exc:
+            return LLMProviderRunResult(provider=provider_name, status="failed", reason=str(exc), summary=None)
+
+        parsed, parse_reason = self._parse_llm_response_with_reason(raw)
+        if parsed.short_summary == "Summary generation failed.":
+            return LLMProviderRunResult(
+                provider=provider_name,
+                status="failed",
+                reason=parse_reason or "invalid JSON summary output",
+                summary=None,
+            )
+
+        grounded = self._enforce_grounding(parsed, statistical, structural)
+        return LLMProviderRunResult(provider=provider_name, status="success", reason=None, summary=grounded)
 
     def _generate_with_failover(self, prompt: str) -> str:
         self.provider_attempts = []
@@ -92,6 +168,7 @@ class LLMSummaryLayer:
             except Exception as exc:
                 last_error = exc
                 self.provider_errors[provider_name] = str(exc)
+                LOGGER.warning("LLM provider '%s' failed: %s", provider_name, exc)
 
         if last_error is not None:
             # Keep fallback deterministic and available even when remote APIs fail.
@@ -103,9 +180,9 @@ class LLMSummaryLayer:
         return self._mock_llm_provider(prompt)
 
     def _generate_with_gemini(self, prompt: str) -> str:
-        api_key = os.getenv("GEMINI_API_KEY")
+        api_key = os.getenv("GEMINI_API_KEY") or self._read_local_env_value("GEMINI_API_KEY")
         if not api_key:
-            raise RuntimeError("GEMINI_API_KEY is not set")
+            raise RuntimeError("GEMINI_API_KEY is not set (env or .env.local)")
 
         model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
         url = (
@@ -123,7 +200,7 @@ class LLMSummaryLayer:
             method="POST",
         )
         try:
-            with urllib_request.urlopen(req, timeout=20) as response:
+            with urllib_request.urlopen(req, timeout=600) as response:
                 body = response.read().decode("utf-8")
         except urllib_error.URLError as exc:
             raise RuntimeError(f"Gemini request failed: {exc}") from exc
@@ -143,7 +220,7 @@ class LLMSummaryLayer:
     def _generate_with_ollama3(self, prompt: str) -> str:
         base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
         model = os.getenv("OLLAMA_MODEL", "llama3:latest")
-        timeout_seconds = int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120"))
+        timeout_seconds = int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "600"))
         url = f"{base_url.rstrip('/')}/api/generate"
         payload = {
             "model": model,
@@ -177,6 +254,24 @@ class LLMSummaryLayer:
         if not isinstance(text, str) or not text.strip():
             raise RuntimeError("Ollama returned empty response text")
         return text
+
+    @staticmethod
+    def _read_local_env_value(key: str) -> Optional[str]:
+        env_path = Path.cwd() / ".env.local"
+        if not env_path.exists():
+            return None
+        try:
+            with env_path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    stripped = line.strip()
+                    if not stripped or stripped.startswith("#") or "=" not in stripped:
+                        continue
+                    env_key, env_val = stripped.split("=", 1)
+                    if env_key.strip() == key:
+                        return env_val.strip().strip('"').strip("'")
+        except OSError:
+            return None
+        return None
 
     def _enforce_grounding(
         self,
@@ -347,9 +442,15 @@ Ensure the summary is grounded strictly in the provided model outputs. Do not in
 
     @staticmethod
     def _parse_llm_response(response: str) -> LLMSummaryOutput:
+        parsed, _ = LLMSummaryLayer._parse_llm_response_with_reason(response)
+        return parsed
+
+    @staticmethod
+    def _parse_llm_response_with_reason(response: str) -> Tuple[LLMSummaryOutput, Optional[str]]:
         import json
-        try:
-            data = json.loads(response)
+
+        def _try_parse(text: str) -> LLMSummaryOutput:
+            data = json.loads(text)
             return LLMSummaryOutput(
                 short_summary=data.get("short_summary", ""),
                 long_summary=data.get("long_summary", ""),
@@ -358,13 +459,35 @@ Ensure the summary is grounded strictly in the provided model outputs. Do not in
                 reserved_factor_note=data.get("reserved_factor_note", ""),
                 final_combined_interpretation=data.get("final_combined_interpretation", ""),
             )
+
+        # First attempt: parse as-is (covers clean JSON responses).
+        try:
+            return _try_parse(response), None
         except json.JSONDecodeError:
-            # Fallback if parsing fails
-            return LLMSummaryOutput(
-                short_summary="Summary generation failed.",
-                long_summary="Unable to parse LLM response.",
-                key_risk_drivers=[],
-                model_disagreement_note="",
-                reserved_factor_note="",
-                final_combined_interpretation="",
-            )
+            pass
+
+        # Second attempt: strip prose prefix/suffix by extracting the first {...} block.
+        start = response.find("{")
+        end = response.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            try:
+                return _try_parse(response[start : end + 1]), None
+            except json.JSONDecodeError:
+                pass
+
+        # Final failure: report with preview.
+        try:
+            json.loads(response)
+        except json.JSONDecodeError as exc:
+            preview = response.strip().replace("\n", " ").replace("\r", " ")[:180]
+            reason = f"invalid JSON summary output: {exc.msg} (near pos {exc.pos}); preview='{preview}'"
+        else:
+            reason = "invalid JSON summary output"
+        return LLMSummaryOutput(
+            short_summary="Summary generation failed.",
+            long_summary="Unable to parse LLM response.",
+            key_risk_drivers=[],
+            model_disagreement_note="",
+            reserved_factor_note="",
+            final_combined_interpretation="",
+        ), reason

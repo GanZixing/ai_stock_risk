@@ -4,7 +4,7 @@ from typing import List, Optional, Sequence
 
 
 _CHART_HEIGHT = 12  # inner grid rows (excluding axes)
-_POINT_CHAR = "█"
+_POINT_CHAR = "*"
 _AXIS_V = "│"
 _AXIS_H = "─"
 _ORIGIN = "└"
@@ -14,6 +14,7 @@ def render_price_chart(
     prices: Sequence[float],
     title: str = "",
     height: int = _CHART_HEIGHT,
+    point_char: str = _POINT_CHAR,
 ) -> str:
     """Return a multi-line ASCII price chart string.
 
@@ -59,18 +60,15 @@ def render_price_chart(
     # grid[row_idx][col_idx]  row_idx=0 is the BOTTOM row
     grid: List[List[str]] = [[" "] * n for _ in range(height)]
 
+    marker = (point_char or _POINT_CHAR)[0]
     for col, row_idx in enumerate(rows):
-        grid[row_idx][col] = _POINT_CHAR
+        grid[row_idx][col] = marker
 
     # --- assemble output lines (top to bottom) ---
     lines: List[str] = []
 
     if title:
         lines.append(title)
-
-    stats = _build_stats_from_prices(clean)
-    lines.append(_format_stats_line(stats))
-    lines.append("")
 
     # Render grid rows top-to-bottom; y-labels on the side at top/mid/bottom.
     interesting_rows = {0, height - 1, height // 2}
@@ -108,35 +106,6 @@ def render_price_chart(
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _build_stats_from_prices(prices: Sequence[float]) -> dict:
-    """Return a dict with latest_price, high, low, return_pct (or None)."""
-    clean = [float(p) for p in prices if p is not None]
-    if not clean:
-        return {"latest_price": None, "high": None, "low": None, "return_pct": None}
-    latest = clean[-1]
-    high = max(clean)
-    low = min(clean)
-    if len(clean) < 2 or clean[0] == 0:
-        return_pct = None
-    else:
-        return_pct = (latest - clean[0]) / abs(clean[0]) * 100.0
-    return {"latest_price": latest, "high": high, "low": low, "return_pct": return_pct}
-
-
-def _format_stats_line(stats: dict) -> str:
-    latest = stats.get("latest_price")
-    high = stats.get("high")
-    low = stats.get("low")
-    return_pct = stats.get("return_pct")
-    sign = "+" if (return_pct or 0) >= 0 else ""
-    return_str = f"{sign}{return_pct:.2f}%" if return_pct is not None else "N/A"
-    return (
-        f"  Latest: {latest:.2f}   "
-        f"High: {high:.2f}   "
-        f"Low: {low:.2f}   "
-        f"Return: {return_str}"
-    )
-
 
 def _x_ticks(n: int, max_ticks: int = 6) -> dict:
     """Return {column_index: label_string} for evenly spaced x-axis ticks."""
@@ -161,6 +130,7 @@ def print_price_chart(
     prices: Sequence[float],
     title: str = "",
     height: int = _CHART_HEIGHT,
+    point_char: str = _POINT_CHAR,
 ) -> None:
     """Convenience wrapper that prints the chart directly to stdout."""
-    print(render_price_chart(prices, title=title, height=height))
+    print(render_price_chart(prices, title=title, height=height, point_char=point_char))

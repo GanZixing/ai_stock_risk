@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from config import ConfigLoader
 from data.yfinance_fundamentals_adapter import YFinanceFundamentalsAdapter
-from llm import LLMSummaryLayer
+from llm import LLMSummaryLayer, LLMProviderRunResult
 from models import StatisticalRiskModel, StructuralRiskModel
 from schemas import FactorConfig, ModelConfig, RESERVED_FACTORS
 from schemas.output_schema import build_agent_output
@@ -498,6 +498,7 @@ def run_stock_risk_agent(
     config_path: Optional[str] = None,
     debug: bool = False,
     prefer_real_market_data: bool = True,
+    llm_run_all_providers: bool = False,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     runtime_data, stat_cfg_override, struct_cfg_override, data_source_info = _load_runtime_payload(
         config_path,
@@ -531,17 +532,48 @@ def run_stock_risk_agent(
     llm_provider_used: Optional[str] = None
     llm_provider_attempts: List[str] = []
     llm_provider_errors: Dict[str, str] = {}
+    llm_provider_results: Dict[str, Dict[str, Any]] = {}
     if not disable_llm:
         summary_layer = LLMSummaryLayer()
-        llm_summary = summary_layer.generate_summary(
-            ticker=ticker,
-            statistical_result=stat_result,
-            structural_result=struct_result,
-            reserved_factors_status={factor: "inactive_placeholder" for factor in RESERVED_FACTORS},
-        )
-        llm_provider_used = summary_layer.last_provider_used
-        llm_provider_attempts = list(summary_layer.provider_attempts)
-        llm_provider_errors = dict(summary_layer.provider_errors)
+        if llm_run_all_providers:
+            all_results = summary_layer.generate_all_provider_summaries(
+                ticker=ticker,
+                statistical_result=stat_result,
+                structural_result=struct_result,
+                reserved_factors_status={factor: "inactive_placeholder" for factor in RESERVED_FACTORS},
+            )
+
+            llm_provider_attempts = list(summary_layer.PROVIDER_ORDER)
+            for name, result in all_results.items():
+                item: Dict[str, Any] = {
+                    "status": result.status,
+                    "reason": result.reason,
+                    "summary": result.summary.__dict__ if result.summary else None,
+                }
+                llm_provider_results[name] = item
+                if result.status == "failed" and result.reason:
+                    llm_provider_errors[name] = result.reason
+
+            # Keep output schema single-summary by selecting first successful provider in order.
+            chosen: Optional[LLMProviderRunResult] = None
+            for name in summary_layer.PROVIDER_ORDER:
+                result = all_results.get(name)
+                if result and result.status == "success" and result.summary is not None:
+                    chosen = result
+                    break
+            if chosen is not None:
+                llm_summary = chosen.summary
+                llm_provider_used = chosen.provider
+        else:
+            llm_summary = summary_layer.generate_summary(
+                ticker=ticker,
+                statistical_result=stat_result,
+                structural_result=struct_result,
+                reserved_factors_status={factor: "inactive_placeholder" for factor in RESERVED_FACTORS},
+            )
+            llm_provider_used = summary_layer.last_provider_used
+            llm_provider_attempts = list(summary_layer.provider_attempts)
+            llm_provider_errors = dict(summary_layer.provider_errors)
 
     output = build_agent_output(
         ticker=ticker,
@@ -622,6 +654,8 @@ def run_stock_risk_agent(
             "provider_used": llm_provider_used,
             "provider_attempts": llm_provider_attempts,
             "provider_errors": llm_provider_errors,
+            "provider_results": llm_provider_results,
+            "run_all_mode": llm_run_all_providers,
         },
     }
     debug_data["underestimation_explanation"] = _low_score_explanation(debug_data)
@@ -632,7 +666,14 @@ def run_stock_risk_agent(
     return output, debug_data
 
 
-def _print_formatted_summary(output: Dict[str, Any], llm_enabled: bool, llm_provider_used: Optional[str] = None) -> None:
+def _print_formatted_summary(
+    output: Dict[str, Any],
+    llm_enabled: bool,
+    llm_provider_used: Optional[str] = None,
+    llm_provider_attempts: Optional[List[str]] = None,
+    llm_provider_errors: Optional[Dict[str, str]] = None,
+    llm_provider_results: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> None:
     stat = output["statistical_risk"]
     struct = output["structural_risk"]
 
@@ -648,8 +689,35 @@ def _print_formatted_summary(output: Dict[str, Any], llm_enabled: bool, llm_prov
         print("LLM Summary:")
         if llm_provider_used:
             print(f"  Provider Used: {llm_provider_used}")
+        if llm_provider_attempts:
+            print(f"  Attempts: {' -> '.join(llm_provider_attempts)}")
+        if llm_provider_errors:
+            print("  Failure Reasons:")
+            for provider_name, reason in llm_provider_errors.items():
+                print(f"    - {provider_name}: {reason}")
         print(f"  Short: {llm_summary['short_summary']}")
         print(f"  Disagreement: {llm_summary['model_disagreement_note']}")
+
+    if llm_enabled and llm_provider_results:
+        print("-")
+        print("LLM Results:")
+        provider_order = ["gemini", "ollama3_local", "fallback_mock"]
+        for provider_name in provider_order:
+            details = llm_provider_results.get(provider_name, {"status": "skipped", "reason": "not run", "summary": None})
+            print(f"[{provider_name}]")
+            print(f"Status: {details.get('status', 'skipped')}")
+            reason = details.get("reason")
+            if reason:
+                print(f"Reason: {reason}")
+            summary = details.get("summary")
+            if details.get("status") == "success" and isinstance(summary, dict):
+                print(f"Short: {summary.get('short_summary', '')}")
+                print(f"Long: {summary.get('long_summary', '')}")
+                drivers = summary.get("key_risk_drivers", [])
+                print(f"Key Drivers: {', '.join(drivers) if drivers else 'N/A'}")
+                print(f"Disagreement: {summary.get('model_disagreement_note', '')}")
+                print(f"Reserved Factors: {summary.get('reserved_factor_note', '')}")
+            print()
 
     print("-")
     print("Reserved Factors:")
@@ -683,6 +751,11 @@ def main() -> None:
         action="store_true",
         help="Render a 30-day ASCII price chart after the risk summary.",
     )
+    parser.add_argument(
+        "--llm-all-providers",
+        action="store_true",
+        help="Run Gemini, Ollama3 local, and fallback mock independently and print all LLM results.",
+    )
 
     args = parser.parse_args()
 
@@ -694,12 +767,16 @@ def main() -> None:
         config_path=args.config,
         debug=args.debug,
         prefer_real_market_data=not args.no_real_market_data,
+        llm_run_all_providers=args.llm_all_providers,
     )
 
     _print_formatted_summary(
         output,
         llm_enabled=not args.disable_llm,
         llm_provider_used=_debug_data.get("llm", {}).get("provider_used"),
+        llm_provider_attempts=_debug_data.get("llm", {}).get("provider_attempts"),
+        llm_provider_errors=_debug_data.get("llm", {}).get("provider_errors"),
+        llm_provider_results=_debug_data.get("llm", {}).get("provider_results"),
     )
 
     if args.output_json:
@@ -712,7 +789,11 @@ def main() -> None:
         if chart_data["success"]:
             prices = [pt["price"] for pt in chart_data["points"]]
             print()
-            print(render_price_chart(prices, title=chart_data["title"]))
+            print(chart_data["title"])
+            for line in chart_data.get("summary_lines", []):
+                print(line)
+            print()
+            print(render_price_chart(prices, height=12, point_char="*"))
         else:
             print(f"\n[Chart] {chart_data['error']}")
 

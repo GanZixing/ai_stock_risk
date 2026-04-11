@@ -1,6 +1,6 @@
 import unittest
 
-from ui.ascii_chart import render_price_chart, _build_stats_from_prices
+from ui.ascii_chart import render_price_chart
 
 
 class TestRenderPriceChart(unittest.TestCase):
@@ -25,7 +25,7 @@ class TestRenderPriceChart(unittest.TestCase):
 
     def test_contains_data_point_char(self):
         result = render_price_chart(self.PRICES_UP)
-        self.assertIn("█", result)
+        self.assertIn("*", result)
 
     def test_title_appears_when_supplied(self):
         result = render_price_chart(self.PRICES_UP, title="TSLA - Last 30 Trading Days")
@@ -37,12 +37,11 @@ class TestRenderPriceChart(unittest.TestCase):
         self.assertNotEqual(lines[0], "")
         self.assertIn("│", result)
 
-    def test_contains_price_stats(self):
+    def test_does_not_embed_price_stats(self):
         result = render_price_chart(self.PRICES_UP)
-        self.assertIn("Latest:", result)
-        self.assertIn("High:", result)
-        self.assertIn("Low:", result)
-        self.assertIn("Return:", result)
+        self.assertNotIn("Latest:", result)
+        self.assertNotIn("30D High", result)
+        self.assertNotIn("30D Low", result)
 
     def test_correct_height_line_count(self):
         height = 10
@@ -68,7 +67,7 @@ class TestRenderPriceChart(unittest.TestCase):
 
     def test_flat_data_renders_without_error(self):
         result = render_price_chart(self.PRICES_FLAT)
-        self.assertIn("█", result)
+        self.assertIn("*", result)
 
     def test_flat_data_shows_single_price_level(self):
         result = render_price_chart(self.PRICES_FLAT)
@@ -86,7 +85,7 @@ class TestRenderPriceChart(unittest.TestCase):
 
     def test_downtrend_renders(self):
         result = render_price_chart(self.PRICES_DOWN)
-        self.assertIn("█", result)
+        self.assertIn("*", result)
 
     def test_min_max_labels_appear(self):
         result = render_price_chart(self.PRICES_UP)
@@ -96,36 +95,11 @@ class TestRenderPriceChart(unittest.TestCase):
 
     def test_two_points_works(self):
         result = render_price_chart([50.0, 75.0])
-        self.assertIn("█", result)
+        self.assertIn("*", result)
 
-    # ------------------------------------------------------------------
-    # Stats helper
-    # ------------------------------------------------------------------
-
-    def test_stats_latest_price(self):
-        stats = _build_stats_from_prices([100.0, 110.0, 105.0])
-        self.assertAlmostEqual(stats["latest_price"], 105.0)
-
-    def test_stats_high_and_low(self):
-        stats = _build_stats_from_prices([100.0, 110.0, 105.0])
-        self.assertAlmostEqual(stats["high"], 110.0)
-        self.assertAlmostEqual(stats["low"], 100.0)
-
-    def test_stats_return_positive(self):
-        stats = _build_stats_from_prices([100.0, 110.0])
-        self.assertAlmostEqual(stats["return_pct"], 10.0)
-
-    def test_stats_return_negative(self):
-        stats = _build_stats_from_prices([120.0, 90.0])
-        self.assertAlmostEqual(stats["return_pct"], -25.0)
-
-    def test_stats_flat_return_zero(self):
-        stats = _build_stats_from_prices([100.0, 100.0, 100.0])
-        self.assertAlmostEqual(stats["return_pct"], 0.0)
-
-    def test_stats_single_point_no_return(self):
-        stats = _build_stats_from_prices([100.0])
-        self.assertIsNone(stats["return_pct"])
+    def test_custom_point_marker_supported(self):
+        result = render_price_chart(self.PRICES_UP, point_char=".")
+        self.assertIn(".", result)
 
 
 if __name__ == "__main__":

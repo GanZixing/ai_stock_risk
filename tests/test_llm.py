@@ -200,6 +200,53 @@ class TestLLMSummaryLayer(unittest.TestCase):
         self.assertEqual(layer.last_provider_used, "fallback_mock")
         self.assertIn("AAPL", result.short_summary)
 
+    def test_generate_all_provider_summaries_reports_statuses(self):
+        layer = LLMSummaryLayer()
+
+        def gemini_fail(_prompt):
+            raise RuntimeError("GEMINI_API_KEY is not set")
+
+        def ollama_ok(_prompt):
+            return '{"short_summary":"ok","long_summary":"long","key_risk_drivers":["annualized_volatility"],"model_disagreement_note":"d","reserved_factor_note":"r","final_combined_interpretation":"f"}'
+
+        layer._generate_with_gemini = gemini_fail
+        layer._generate_with_ollama3 = ollama_ok
+
+        results = layer.generate_all_provider_summaries(
+            ticker="AAPL",
+            statistical_result=self.statistical_result,
+            structural_result=self.structural_result,
+        )
+
+        self.assertEqual(results["gemini"].status, "failed")
+        self.assertIn("GEMINI_API_KEY", results["gemini"].reason)
+        self.assertEqual(results["ollama3_local"].status, "success")
+        self.assertIsNotNone(results["ollama3_local"].summary)
+        self.assertEqual(results["fallback_mock"].status, "success")
+
+    def test_generate_all_provider_summaries_marks_invalid_json_failed(self):
+        layer = LLMSummaryLayer()
+
+        def gemini_invalid(_prompt):
+            return "not-json"
+
+        def ollama_invalid(_prompt):
+            return "still-not-json"
+
+        layer._generate_with_gemini = gemini_invalid
+        layer._generate_with_ollama3 = ollama_invalid
+
+        results = layer.generate_all_provider_summaries(
+            ticker="AAPL",
+            statistical_result=self.statistical_result,
+            structural_result=self.structural_result,
+        )
+
+        self.assertEqual(results["gemini"].status, "failed")
+        self.assertIn("invalid JSON summary output", results["gemini"].reason)
+        self.assertEqual(results["ollama3_local"].status, "failed")
+        self.assertIn("invalid JSON summary output", results["ollama3_local"].reason)
+
 
 if __name__ == "__main__":
     unittest.main()
