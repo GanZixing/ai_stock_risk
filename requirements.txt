@@ -1,0 +1,9 @@
+# Core market-data dependency
+# Pulls in pandas/numpy/requests and related transitive dependencies.
+yfinance>=0.2.40
+
+# UI dependency for Streamlit app (ui/app.py)
+streamlit>=1.33.0
+
+# Ensures IANA timezone database is available for zoneinfo on Windows.
+tzdata>=2024.1
